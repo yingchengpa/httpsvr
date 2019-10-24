@@ -50,10 +50,54 @@ namespace urlhandle{
     }
 
     // 
-    void get_request(evhttp_request *req, funcPtr)
+    void get_request(evhttp_request *req, funcPtr func)
     {
-		//LOG_TRACE("--->get method");
-        evhttp_send_reply(req, HTTP_OK, "OK", NULL);
+		// get url
+		std::string strUrl = evhttp_request_get_uri(req);
+
+		//trace url
+		LOG_TRACE("the url is %s", strUrl.c_str());
+
+		//get head
+		evkeyvalq* headers = evhttp_request_get_input_headers(req);
+
+		//trace the heads 
+		for (evkeyval* header = headers->tqh_first; header; header = header->next.tqe_next) {
+			LOG_TRACE("  %s: %s", header->key, header->value);
+		}
+
+		//get the query map
+		std::map<std::string, std::string> oQueryMap;
+		get_uri_query_map(strUrl, oQueryMap);
+
+		//func 
+		std::string strResponse;
+		if (func)
+		{
+			int nRet = 0;
+			std::string strRetDes;
+
+			std::tie(nRet, strRetDes, strResponse) = func("", oQueryMap);
+
+			if (!strResponse.empty())
+			{
+				evbuffer* retbuff = nullptr;
+				retbuff = evbuffer_new();
+
+				evbuffer_add_printf(retbuff, strResponse.c_str());
+
+				evhttp_send_reply(req, nRet, strRetDes.c_str(), retbuff);
+				evbuffer_free(retbuff);
+			}
+			else
+			{
+				evhttp_send_reply(req, nRet, strRetDes.c_str(), NULL);
+			}
+		}
+		else
+		{
+			evhttp_send_reply(req, HTTP_OK, "OK", NULL);
+		}
     }
 
     // post µÄaiaction´¦Àí
