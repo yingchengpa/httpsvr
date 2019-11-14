@@ -130,14 +130,17 @@ namespace urlhandle{
 			{
 				const size_t copy_len = body_size > BUF_MAX ? BUF_MAX : body_size;
 
-				std::unique_ptr<char[]> bodydata(new char[copy_len + 1]);
+				std::unique_ptr<char[]> bodydata(new char[copy_len ]);
 
-				memset(bodydata.get(), 0, copy_len + 1);
+				memset(bodydata.get(), 0, copy_len );
 				memcpy(bodydata.get(), evbuffer_pullup(buf, -1), copy_len);
 
-				strBody = bodydata.get();
+				//非 /0 结束符也可以支持
+				strBody.assign(bodydata.get(), copy_len);
 			}
 		}
+
+		LOG_DEBUG("url is %s , body is %s", strUrl.c_str(), strBody.c_str());
 
 		//func 
 		std::string strResponse;
@@ -153,7 +156,7 @@ namespace urlhandle{
                 evbuffer *retbuff = nullptr;
                 retbuff = evbuffer_new();
 
-                evbuffer_add_printf(retbuff, strResponse.c_str());
+				evbuffer_add_reference(retbuff, strResponse.c_str(),strResponse.size(),nullptr,nullptr);
 
                 evhttp_send_reply(req, nRet, strRetDes.c_str(), retbuff);
                 evbuffer_free(retbuff);

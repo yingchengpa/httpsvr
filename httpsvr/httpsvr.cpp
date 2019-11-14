@@ -155,7 +155,8 @@ int _tmain(int argc, _TCHAR* argv[])
 	WSAStartup(MAKEWORD(2, 2), &wsaData);
 
 	int nPort = 8090;
-	startHttpSvrMult(nPort, 10);
+	std::thread t1(startHttpSvrMult, nPort, 4);
+	t1.detach();
 
 	return 0;
 }
