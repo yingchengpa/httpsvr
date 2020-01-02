@@ -1,7 +1,5 @@
 #include "stdafx.h"
-
 #include "urlHandle.h"
-
 
 namespace urlhandle{
 
@@ -29,62 +27,70 @@ namespace urlhandle{
 		}
 	}
 
-    void request_cb(evhttp_request *req, void *arg)
-    {
-        auto &obj = *static_cast<std::map<evhttp_cmd_type, funcPtr> *>(arg);
+	void get_request_body(evhttp_request* req,std::string &strBody)
+	{
+		evbuffer* buf = evhttp_request_get_input_buffer(req);
+		const size_t body_size = evbuffer_get_length(buf);
+		if (body_size > 0)
+		{
+			const size_t copy_len = body_size > BUF_MAX ? BUF_MAX : body_size;
 
-        const evhttp_cmd_type nCmd = evhttp_request_get_command(req);
-		
-        switch (nCmd) {
-        case EVHTTP_REQ_POST:
-            post_request(req, obj[nCmd]);
-            break;
-        case EVHTTP_REQ_GET:
-            get_request(req, obj[nCmd]);
-            break;
-        default:
-            default_request(req);
-            break;
-        }
+			std::unique_ptr<char[]> bodydata(new char[copy_len]);
 
-    }
+			memset(bodydata.get(), 0, copy_len);
+			memcpy(bodydata.get(), evbuffer_pullup(buf, -1), copy_len);
 
-    // 
-    void get_request(evhttp_request *req, funcPtr func)
-    {
+			//assign the byte data , include '\0' char.
+			strBody.assign(bodydata.get(), copy_len);
+		}
+	}
+
+	void url_method_dowith(evhttp_request* req, httpFuncPtr func)
+	{
+		DWORD dwStart = GetTickCount();
+
 		// get url
 		std::string strUrl = evhttp_request_get_uri(req);
 
-		//trace url
-		LOG_TRACE("the url is %s", strUrl.c_str());
+		////get head
+		//evkeyvalq *headers = evhttp_request_get_input_headers(req);
 
-		//get head
-		evkeyvalq* headers = evhttp_request_get_input_headers(req);
-
-		//trace the heads 
-		for (evkeyval* header = headers->tqh_first; header; header = header->next.tqe_next) {
-			LOG_TRACE("  %s: %s", header->key, header->value);
-		}
+		////trace the heads 
+		//for (evkeyval *header = headers->tqh_first; header; header = header->next.tqe_next) {
+		//    LOG_TRACE("  %s: %s", header->key, header->value);
+		//}
 
 		//get the query map
 		std::map<std::string, std::string> oQueryMap;
-		get_uri_query_map(strUrl, oQueryMap);
+		get_uri_query_map(strUrl,oQueryMap);
 
-		//func 
-		std::string strResponse;
+		//get the body
+		std::string strBody;
+		get_request_body(req, strBody);
+
+		//LOG_DEBUG("url is %s , body is %s", strUrl.c_str(), strBody.c_str());
+
+		//call the register func
+		std::string strResponse;	//
 		if (func)
 		{
-			int nRet = 0;
-			std::string strRetDes;
+			int nRet = 0;			 // http errcode , HTTP_OK HTTP_NOCONTENT ......
+			std::string strRetDes;	 // describe of errcode 
 
-			std::tie(nRet, strRetDes, strResponse) = func("", oQueryMap);
+			std::string strBody;
+			get_request_body(req, strBody);
+			//url
+			//body	  
+			//queryMap
+			std::tie(nRet, strRetDes, strResponse) = func(strUrl, strBody, oQueryMap);
 
 			if (!strResponse.empty())
 			{
 				evbuffer* retbuff = nullptr;
 				retbuff = evbuffer_new();
 
-				evbuffer_add_printf(retbuff, strResponse.c_str());
+				//append the byte data ：evbuffer_add_reference只是临时copy，再未发送前会释放内存
+				evbuffer_add(retbuff, strResponse.c_str(), strResponse.size());
 
 				evhttp_send_reply(req, nRet, strRetDes.c_str(), retbuff);
 				evbuffer_free(retbuff);
@@ -98,82 +104,28 @@ namespace urlhandle{
 		{
 			evhttp_send_reply(req, HTTP_OK, "OK", NULL);
 		}
-    }
 
-    // post 的aiaction处理
-    void post_request(evhttp_request *req, funcPtr func)
-    {
-        // get url
-        std::string strUrl = evhttp_request_get_uri(req);
-
-		//trace url
-		LOG_TRACE("the url is %s",strUrl.c_str());
-
-        //get head
-        evkeyvalq *headers = evhttp_request_get_input_headers(req);
-
-        //trace the heads 
-        for (evkeyval *header = headers->tqh_first; header; header = header->next.tqe_next) {
-            LOG_TRACE("  %s: %s", header->key, header->value);
-        }
-
-		//get the query map
-		std::map<std::string, std::string> oQueryMap;
-		get_uri_query_map(strUrl,oQueryMap);
-
-        //get the body
-		std::string strBody;
-		{
-			evbuffer *buf = evhttp_request_get_input_buffer(req);
-			const size_t body_size = evbuffer_get_length(buf);
-			if (body_size > 0)
-			{
-				const size_t copy_len = body_size > BUF_MAX ? BUF_MAX : body_size;
-
-				std::unique_ptr<char[]> bodydata(new char[copy_len ]);
-
-				memset(bodydata.get(), 0, copy_len );
-				memcpy(bodydata.get(), evbuffer_pullup(buf, -1), copy_len);
-
-				//非 /0 结束符也可以支持
-				strBody.assign(bodydata.get(), copy_len);
-			}
-		}
-
-		LOG_DEBUG("url is %s , body is %s", strUrl.c_str(), strBody.c_str());
-
-		//func 
-		std::string strResponse;
-		if (func)
-        {
-            int nRet = 0;
-            std::string strRetDes;
-                
-            std::tie(nRet, strRetDes, strResponse) = func(strBody,oQueryMap);
-
-            if (!strResponse.empty())
-            {
-                evbuffer *retbuff = nullptr;
-                retbuff = evbuffer_new();
-
-				evbuffer_add_reference(retbuff, strResponse.c_str(),strResponse.size(),nullptr,nullptr);
-
-                evhttp_send_reply(req, nRet, strRetDes.c_str(), retbuff);
-                evbuffer_free(retbuff);
-            }
-            else
-            {
-                evhttp_send_reply(req, nRet, strRetDes.c_str(), NULL);
-            }	
-        }
-        else
-        {
-            evhttp_send_reply(req, HTTP_OK, "OK", NULL);
-        }    
-    }
+	}
 
     void default_request(evhttp_request *req)
     {
         evhttp_send_reply(req, HTTP_NOTFOUND, "not found", NULL);
     }
+
+	void request_cb(evhttp_request* req, void* arg)
+	{
+		auto& obj = *static_cast<std::map<evhttp_cmd_type, httpFuncPtr>*>(arg);
+
+		const evhttp_cmd_type nCmd = evhttp_request_get_command(req);
+
+		switch (nCmd) {
+		case EVHTTP_REQ_POST:
+		case EVHTTP_REQ_GET:
+			url_method_dowith(req, obj[nCmd]);
+			break;
+		default:
+			default_request(req);
+			break;
+		}	
+	}
 }

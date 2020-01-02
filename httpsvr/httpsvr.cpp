@@ -3,25 +3,26 @@
 
 #include "stdafx.h"
 
-
 static void default_request_cb(struct evhttp_request* req, void* arg);
 
 /*
  * 注册指定url下的 post、get、put、delet 的处理函数
  */
-std::map<std::string, std::map<evhttp_cmd_type, funcPtr> > g_urlHandle =
+std::map<std::string, std::map<evhttp_cmd_type, httpFuncPtr> > s_urlHandle;
+
+//{
+//	// 
+//	{ "/api/v1/checksvr/oneResult",
+//		{
+//			{ EVHTTP_REQ_POST, oneresult::PostOneResult }
+//		}
+//	}
+//};
+
+void addHttpHandle(evhttp_cmd_type method, const std::string& strUrl, httpFuncPtr func)
 {
-	{ "/v1.0/open/action",
-		{
-			{ EVHTTP_REQ_POST, action::postRequest }
-		}
-	},
-	{ "/v1.0/open/ai",
-		{
-			{ EVHTTP_REQ_POST, ai::postRequest }
-		}
-	}
-};
+	s_urlHandle[strUrl][method] = func;
+}
 
 // 以单线程模式启动httpsvr
 int startHttpSvrSingle(const short& nPort)
@@ -47,7 +48,7 @@ int startHttpSvrSingle(const short& nPort)
 
 
 	// 注册url回调函数
-	for (auto& v : g_urlHandle)
+	for (auto& v : s_urlHandle)
 	{
 		evhttp_set_cb(http, v.first.c_str(), urlhandle::request_cb, &(v.second));
 	}
@@ -72,7 +73,6 @@ int startHttpSvrSingle(const short& nPort)
 
 }
 
-// 以多线程模式启动httpsvr
 evutil_socket_t httpsvr_bindsocket(const short& nPort)
 {
 	evutil_socket_t  sock_fd = ::socket(AF_INET, SOCK_STREAM, 0); //创建tcp的fd
@@ -104,6 +104,7 @@ void httpsvr_dispatch(void* arg)
 	event_base_dispatch((struct event_base*)arg);
 }
 
+// 以多线程模式启动httpsvr
 int startHttpSvrMult(const short& nPort, const size_t& nThreadNum)
 {
 	evutil_socket_t nfd = httpsvr_bindsocket(nPort);
@@ -123,13 +124,14 @@ int startHttpSvrMult(const short& nPort, const size_t& nThreadNum)
 			}
 
 			// 注册url回调函数
-			for (auto& v : g_urlHandle)
+			for (auto& v : s_urlHandle)
 			{
 				evhttp_set_cb(httpd, v.first.c_str(), urlhandle::request_cb, &(v.second));
 			}
 
 			/* We want to accept arbitrary requests, so we need to set a "generic"
 			*   * cb.  We can also add callbacks for specific paths. */
+
 			evhttp_set_gencb(httpd, default_request_cb, NULL);
 
 			std::thread t(httpsvr_dispatch, base);
@@ -138,32 +140,25 @@ int startHttpSvrMult(const short& nPort, const size_t& nThreadNum)
 		}
 
 		LOG_INFO("http server bind %d port", nPort);
+
 		for (auto& v : oThreadList)
 		{
 			v.join();
-		}
-
+		}		
 	}
 
 	return 0;
 }
 
-int _tmain(int argc, _TCHAR* argv[])
+void initHttpSvr(int nPort,int nThreadNum)
 {
-	WSADATA wsaData;
-	// Initialize Winsock
-	WSAStartup(MAKEWORD(2, 2), &wsaData);
-
-	int nPort = 8090;
-	std::thread t1(startHttpSvrMult, nPort, 4);
+	std::thread t1(startHttpSvrMult, nPort, nThreadNum);
 	t1.detach();
-
-	return 0;
+	return ;
 }
 
 static void default_request_cb(struct evhttp_request* req, void* arg)
 {
-
 	const char* cmdtype;
 	struct evkeyvalq* headers;
 	struct evkeyval* header;
@@ -189,4 +184,16 @@ static void default_request_cb(struct evhttp_request* req, void* arg)
 		LOG_TRACE("  %s: %s", header->key, header->value);
 	}
 	evhttp_send_reply(req, 200, "OK", NULL);
+}
+
+int _tmain(int argc, _TCHAR* argv[])
+{
+	WSADATA wsaData;
+	// Initialize Winsock
+	WSAStartup(MAKEWORD(2, 2), &wsaData);
+
+	initHttpSvr(8090);
+
+     //// wait......
+	return 0;
 }
